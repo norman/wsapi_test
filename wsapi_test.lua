@@ -5,8 +5,8 @@ wsapi.common  = require "wsapi.common"
 wsapi.request = require "wsapi.request"
 wsapi.util    = require "wsapi.util"
 
-local function base_request()
-  local request = {
+local function build_request(method, path, headers)
+  local req = {
     GATEWAY_INTERFACE    = "CGI/1.1",
     HTTP_ACCEPT          = "application/xml,application/xhtml+xml,text/html;q=0.9,text/plain;q=0.8,image/png,*/*;q=0.5",
     HTTP_ACCEPT_CHARSET  = "ISO-8859-1,utf-8;q=0.7,*;q=0.3",
@@ -24,11 +24,19 @@ local function base_request()
     SERVER_PORT          = "80",
     SERVER_PROTOCOL      = "HTTP/1.1"
   }
+
+  req.PATH_INFO      = path
+  req.REQUEST_METHOD = method:upper()
+  req.METHOD         = req.REQUEST_METHOD
+  req.REQUEST_PATH   = "/"
+
+  if req.PATH_INFO == "" then req.PATH_INFO = "/" end
+
   -- allow case-insensitive table key access
-  setmetatable(request, {__index = function(t, k)
+  setmetatable(req, {__index = function(t, k)
     return rawget(t, string.upper(k))
   end})
-  return request
+  return req
 end
 
 function wsapi.common.send_output(out, status, headers, res_iter, write_method, res_line)
@@ -53,26 +61,22 @@ local function make_io_object()
 end
 
 local function build_get(path, params, headers)
-  local env = base_request()
-  env.PATH_INFO      = path
-  env.QUERY_STRING   = wsapi.request.methods.qs_encode(nil, params)
-  env.REQUEST_METHOD = "GET"
-  env.METHOD         = env.REQUEST_METHOD
-  env.REQUEST_PATH   = "/"
+  local req = build_request("GET", path, headers)
 
-  if env.PATH_INFO == "" then env.PATH_INFO = "/" end
-  env.REQUEST_URI = "http://" .. env.HTTP_HOST .. env.PATH_INFO .. env.QUERY_STRING
+  req.QUERY_STRING = wsapi.request.methods.qs_encode(nil, params)
+  req.REQUEST_URI  = "http://" .. req.HTTP_HOST .. req.PATH_INFO .. req.QUERY_STRING
 
-  for k, v in pairs(headers or {}) do
-    env[string.upper(tostring(k))] = tostring(v)
-  end
+  for k, v in pairs(headers or {}) do req[k] = v end
 
   return {
-    env    = env,
+    env    = req,
     input  = make_io_object(),
     output = make_io_object(),
     error  = make_io_object()
   }
+end
+
+local function build_post(path, params, headers)
 end
 
 local methods = {}
