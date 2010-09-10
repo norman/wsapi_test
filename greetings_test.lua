@@ -27,3 +27,18 @@ do
   assert(response.code == 200)
   assert(response.body:match("Ciao Joe"))
 end
+
+do
+  local response = app:post("/say_hi", {name = "Joe", lang = "en"})
+  print("Should get English greeting via POST")
+  assert(response.code == 200)
+  assert(response.body:match("Hi Joe"))
+end
+
+do
+  local response = app:post("/say_hi")
+  print("Should get error message when no name is posted")
+  assert(response.code == 200)
+  assert(response.body:match("have no name"))
+end
+

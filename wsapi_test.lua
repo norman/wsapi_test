@@ -3,7 +3,6 @@ module(..., package.seeall)
 local wsapi = {}
 wsapi.common  = require "wsapi.common"
 wsapi.request = require "wsapi.request"
-wsapi.util    = require "wsapi.util"
 
 local function build_request(method, path, headers)
   local req = {
@@ -32,6 +31,8 @@ local function build_request(method, path, headers)
 
   if req.PATH_INFO == "" then req.PATH_INFO = "/" end
 
+  for k, v in pairs(headers or {}) do req[k] = v end
+
   -- allow case-insensitive table key access
   setmetatable(req, {__index = function(t, k)
     return rawget(t, string.upper(k))
@@ -39,11 +40,13 @@ local function build_request(method, path, headers)
   return req
 end
 
+-- Override common's output handler to avoid writing headers
+-- in the reponse body.
 function wsapi.common.send_output(out, status, headers, res_iter, write_method, res_line)
    wsapi.common.send_content(out, res_iter, out:write())
 end
 
-local function make_io_object()
+local function make_io_object(content)
   local buffer = {}
   local receiver = {}
   function receiver:write(content)
@@ -57,16 +60,14 @@ local function make_io_object()
   function receiver:clear()
     buffer = {}
   end
+  if content then receiver:write(content) end
   return receiver
 end
 
 local function build_get(path, params, headers)
   local req = build_request("GET", path, headers)
-
   req.QUERY_STRING = wsapi.request.methods.qs_encode(nil, params)
   req.REQUEST_URI  = "http://" .. req.HTTP_HOST .. req.PATH_INFO .. req.QUERY_STRING
-
-  for k, v in pairs(headers or {}) do req[k] = v end
 
   return {
     env    = req,
@@ -77,23 +78,43 @@ local function build_get(path, params, headers)
 end
 
 local function build_post(path, params, headers)
+  local req = build_request("POST", path, headers)
+  local body = wsapi.request.methods.qs_encode(nil, params):gsub("^?", "")
+  req.REQUEST_URI  = "http://" .. req.HTTP_HOST .. req.PATH_INFO
+  req.CONTENT_TYPE = "x-www-form-urlencoded"
+  req.CONTENT_LENGTH = #body
+  local input = make_io_object(body)
+
+  return {
+    env    = req,
+    input  = input,
+    output = make_io_object(),
+    error  = make_io_object()
+  }
 end
 
-local methods = {}
-
-function methods:get(path, params, headers)
-  local wsapi_env = build_get(path, params, headers)
+local function make_request(request_builder, app, path, params, headers)
+  local wsapi_env = request_builder(path, params, headers)
   local response = {}
-  response.code, response.headers = wsapi.common.run(self.app, wsapi_env)
+  response.code, response.headers = wsapi.common.run(app, wsapi_env)
   response.body = wsapi_env.output:read()
   return response, wsapi_env.env
 end
 
+local function get(self, path, params, headers)
+  return make_request(build_get, self.app, path, params, headers)
+end
+
+local function post(self, path, params, headers)
+  return make_request(build_post, self.app, path, params, headers)
+end
 
 function make_handler(app)
-  local handler = {app = app}
-  setmetatable(handler, {__index = methods})
-  return handler
+  return {
+    app  = app,
+    get  = get,
+    post = post
+  }
 end
 
 function publish_funcs_for_testing()
